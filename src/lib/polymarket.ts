@@ -1,5 +1,4 @@
 // Polymarket integration - recycled from Amplifi's PolymarketClient + CLOBKeyService
-// Uses @polymarket/clob-client for auth, EIP-712 signing, and order placement
 
 import { ClobClient } from "@polymarket/clob-client";
 import { createWalletClient, createPublicClient, http, parseAbi } from "viem";
@@ -23,52 +22,101 @@ const CTF_ABI = parseAbi([
 // --- Gamma API (public, no auth) ---
 
 export interface PolymarketMarket {
-  condition_id: string;
-  question_id: string;
+  id: string;
   question: string;
-  tokens: { token_id: string; outcome: string; price: string }[];
+  conditionId: string;
+  slug: string;
+  outcomes: string;          // JSON string: '["Yes", "No"]'
+  outcomePrices: string;     // JSON string: '["0.55", "0.45"]'
+  clobTokenIds: string;      // JSON string: '["123...", "456..."]'
+  volume: string;
+  liquidity: string;
+  endDate: string;
   active: boolean;
   closed: boolean;
-  volume: string;
-  end_date_iso: string;
+  orderPriceMinTickSize: number;
+  orderMinSize: number;
 }
 
-export async function searchMarkets(query: string, limit = 10): Promise<PolymarketMarket[]> {
+export interface ParsedMarket {
+  id: string;
+  question: string;
+  conditionId: string;
+  slug: string;
+  yesTokenId: string;
+  noTokenId: string;
+  yesPrice: number;
+  noPrice: number;
+  volume: number;
+  liquidity: number;
+  endDate: string;
+  minTickSize: number;
+  minOrderSize: number;
+}
+
+function parseMarket(m: PolymarketMarket): ParsedMarket {
+  const tokenIds = JSON.parse(m.clobTokenIds) as string[];
+  const prices = JSON.parse(m.outcomePrices) as string[];
+  return {
+    id: m.id,
+    question: m.question,
+    conditionId: m.conditionId,
+    slug: m.slug,
+    yesTokenId: tokenIds[0] ?? "",
+    noTokenId: tokenIds[1] ?? "",
+    yesPrice: parseFloat(prices[0] ?? "0"),
+    noPrice: parseFloat(prices[1] ?? "0"),
+    volume: parseFloat(m.volume),
+    liquidity: parseFloat(m.liquidity),
+    endDate: m.endDate,
+    minTickSize: m.orderPriceMinTickSize,
+    minOrderSize: m.orderMinSize,
+  };
+}
+
+export async function searchMarkets(query: string, limit = 10): Promise<ParsedMarket[]> {
   const params = new URLSearchParams({ _limit: String(limit), active: "true", closed: "false" });
   const res = await fetch(`${GAMMA_URL}/markets?${params}`);
   if (!res.ok) throw new Error(`Gamma search failed: ${res.status}`);
-  const markets: PolymarketMarket[] = await res.json();
-  if (!query) return markets;
-  return markets.filter((m) => m.question.toLowerCase().includes(query.toLowerCase()));
+  const raw: PolymarketMarket[] = await res.json();
+  const parsed = raw.filter((m) => m.clobTokenIds && m.clobTokenIds !== "[]").map(parseMarket);
+  if (!query) return parsed;
+  const q = query.toLowerCase();
+  return parsed.filter((m) => m.question.toLowerCase().includes(q));
 }
 
-export async function getMarket(conditionId: string): Promise<PolymarketMarket> {
+export async function getMarket(conditionId: string): Promise<ParsedMarket> {
   const res = await fetch(`${GAMMA_URL}/markets/${conditionId}`);
   if (!res.ok) throw new Error(`Gamma market fetch failed: ${res.status}`);
-  return res.json();
+  return parseMarket(await res.json());
 }
 
 // --- CLOB Client (auth + orders) ---
-// Pattern from Amplifi's CLOBKeyService + PolymarketClient
 
 let _clobClient: ClobClient | null = null;
+
+function getSolverWalletClient() {
+  const pk = process.env.SOLVER_POLYGON_PRIVATE_KEY as `0x${string}`;
+  if (!pk) throw new Error("SOLVER_POLYGON_PRIVATE_KEY not set");
+  const account = privateKeyToAccount(pk);
+  return createWalletClient({
+    account,
+    chain: polygon,
+    transport: http(getPolygonRpc()),
+  });
+}
 
 async function getClobClient(): Promise<ClobClient> {
   if (_clobClient) return _clobClient;
 
-  const pk = process.env.SOLVER_POLYGON_PRIVATE_KEY;
-  if (!pk) throw new Error("SOLVER_POLYGON_PRIVATE_KEY not set");
+  const signer = getSolverWalletClient();
 
-  // Step 1: Create client without credentials to derive API key
-  // signatureType=0 = EOA (Amplifi uses 2 for Safe, we use 0 for simplicity)
-  const tempClient = new ClobClient(CLOB_URL, POLYGON_CHAIN_ID, pk as `0x${string}`);
-
-  // Step 2: Derive API credentials from private key signature
+  // signatureType=0 = EOA (Amplifi uses 2 for Safe)
+  const tempClient = new ClobClient(CLOB_URL, POLYGON_CHAIN_ID, signer as any);
   const creds = await tempClient.createOrDeriveApiKey();
 
-  // Step 3: Create authenticated client
-  _clobClient = new ClobClient(CLOB_URL, POLYGON_CHAIN_ID, pk as `0x${string}`, {
-    key: creds.apiKey,
+  _clobClient = new ClobClient(CLOB_URL, POLYGON_CHAIN_ID, signer as any, {
+    key: creds.key,
     secret: creds.secret,
     passphrase: creds.passphrase,
   });
@@ -87,7 +135,6 @@ export interface SolverBuyResult {
 export async function buyShares(tokenId: string, usdcAmount: number): Promise<SolverBuyResult> {
   const client = await getClobClient();
 
-  // FAK (Fill-And-Kill) market order, same pattern as Amplifi
   const order = await client.createAndPostMarketOrder({
     tokenID: tokenId,
     amount: usdcAmount,
@@ -105,6 +152,10 @@ export async function buyShares(tokenId: string, usdcAmount: number): Promise<So
 
 // --- CTF Transfer (ERC1155 on Polygon) ---
 
+function getPolygonRpc() {
+  return process.env.POLYGON_RPC_URL ?? "https://polygon-bor-rpc.publicnode.com";
+}
+
 export async function transferCTF(
   tokenId: string,
   amount: bigint,
@@ -113,31 +164,25 @@ export async function transferCTF(
   const pk = process.env.SOLVER_POLYGON_PRIVATE_KEY as `0x${string}`;
   if (!pk) throw new Error("SOLVER_POLYGON_PRIVATE_KEY not set");
 
-  const rpcUrl = process.env.POLYGON_RPC_URL ?? "https://polygon-rpc.com";
   const account = privateKeyToAccount(pk);
-
   const walletClient = createWalletClient({
     account,
     chain: polygon,
-    transport: http(rpcUrl),
+    transport: http(getPolygonRpc()),
   });
 
-  const hash = await walletClient.writeContract({
+  return walletClient.writeContract({
     address: CTF_ADDRESS,
     abi: CTF_ABI,
     functionName: "safeTransferFrom",
     args: [account.address, recipientAddress, BigInt(tokenId), amount, "0x"],
   });
-
-  return hash;
 }
 
 export async function getCTFBalance(tokenId: string): Promise<bigint> {
   const pk = process.env.SOLVER_POLYGON_PRIVATE_KEY as `0x${string}`;
   const account = privateKeyToAccount(pk);
-  const rpcUrl = process.env.POLYGON_RPC_URL ?? "https://polygon-rpc.com";
-
-  const client = createPublicClient({ chain: polygon, transport: http(rpcUrl) });
+  const client = createPublicClient({ chain: polygon, transport: http(getPolygonRpc()) });
 
   return client.readContract({
     address: CTF_ADDRESS,

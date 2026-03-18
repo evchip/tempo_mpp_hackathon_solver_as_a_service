@@ -1,5 +1,6 @@
 // GET /api/polymarket?q=bitcoin&limit=10
-// Search Polymarket markets -- public data, no auth needed
+// GET /api/polymarket?condition_id=0x...
+// Search or get Polymarket markets
 // Cost: 0.10 USDC per call
 
 import { NextRequest } from "next/server";
@@ -13,15 +14,14 @@ export async function GET(req: NextRequest) {
   const payment = await mpp.charge({ amount: "0.10" })(req);
   if (payment.status === 402) return payment.challenge;
 
-  const query = req.nextUrl.searchParams.get("q") ?? "";
   const conditionId = req.nextUrl.searchParams.get("condition_id");
-  const limit = parseInt(req.nextUrl.searchParams.get("limit") ?? "10");
-
   if (conditionId) {
     const market = await getMarket(conditionId);
     return payment.withReceipt(Response.json({ market }));
   }
 
+  const query = req.nextUrl.searchParams.get("q") ?? "";
+  const limit = parseInt(req.nextUrl.searchParams.get("limit") ?? "10");
   const markets = await searchMarkets(query, limit);
   return payment.withReceipt(Response.json({ markets, count: markets.length }));
 }
