@@ -2,7 +2,7 @@
 // Docs: https://mpp.dev
 // SDK: https://github.com/wevm/mppx
 
-import { PATH_USD } from "./tempo";
+import { USDC } from "./tempo";
 
 // Server-side: create an MPP instance for charging callers
 export function createMppServer(recipientAddress: `0x${string}`) {
@@ -11,7 +11,7 @@ export function createMppServer(recipientAddress: `0x${string}`) {
     Mppx.create({
       methods: [
         tempo({
-          currency: PATH_USD,
+          currency: USDC,
           recipient: recipientAddress,
         }),
       ],

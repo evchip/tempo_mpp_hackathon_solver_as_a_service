@@ -9,10 +9,10 @@
 
 ```
 Browser UI (Next.js)
-    ↓ user grants Access Key (pathUSD spending limit, 1hr expiry)
+    ↓ user grants Access Key (USDC spending limit, 1hr expiry)
 /api/agent  ←  orchestrator with mppx: fetch() auto-pays 402 challenges
     │
-    ├── /api/kalshi-markets          ← OUR MPP service (1 pathUSD)
+    ├── /api/kalshi-markets          ← OUR MPP service (1 USDC)
     │   (Kalshi market data)
     │
     ├── anthropic.mpp.tempo.xyz      ← MARKETPLACE service (pay-per-token)
@@ -26,7 +26,7 @@ No API keys needed for Claude -- it pays per call via MPP.
 
 **Tempo primitives used:**
 - **Access Keys** (AccountKeychain precompile `0xAAAAA...`) -- protocol-native spending limits per TIP-20 token
-- **pathUSD** -- native stablecoin on Tempo mainnet
+- **USDC** -- native stablecoin on Tempo mainnet
 - **Payment lanes** -- guaranteed blockspace for payment txs even under load
 
 **Payment protocol:** MPP (Machine Payments Protocol) via `mppx` SDK (by wevm)
@@ -61,9 +61,9 @@ bun dev
 | Kalshi account | kalshi.com -> Settings -> API | Sandbox trading |
 | ~~Anthropic API key~~ | ~~not needed~~ | Claude called via MPP marketplace (pay-per-call) |
 
-### Get mainnet pathUSD
+### Get mainnet USDC
 - Bridge USDC from Base/Ethereum via Stargate or Across
-- Or get pathUSD from the Tempo faucet if one is available at launch
+- Or get USDC from the Tempo faucet if one is available at launch
 
 ### Install Tempo agent skill (gives Claude SDK knowledge)
 ```bash
@@ -98,7 +98,7 @@ Priority: **P0** = must ship, **P1** = should ship, **P2** = stretch
 
 | Task | Priority | Effort | Notes |
 |------|----------|--------|-------|
-| Fund agent wallet with pathUSD on Tempo mainnet | P0 | 10m | Bridge or faucet |
+| Fund agent wallet with USDC on Tempo mainnet | P0 | 10m | Bridge or faucet |
 | Hit `/api/kalshi-markets` from curl -- verify 402 response | P0 | 10m | Tests MPP server side |
 | Call from agent with `initMppClient()` -- verify auto-pay | P0 | 20m | Tests MPP client side end-to-end |
 
@@ -109,7 +109,7 @@ Priority: **P0** = must ship, **P1** = should ship, **P2** = stretch
 | Add wagmi/viem wallet connector to UI | P0 | 45m | MetaMask, Tempo chain 4217 |
 | Build Access Key grant flow in UI | P0 | 1hr | User signs `KeyAuthorization`, tx sent via viem |
 | Poll `getRemainingLimit()` and show live in UI | P0 | 30m | `ACCOUNT_KEYCHAIN` precompile in `src/lib/tempo.ts` |
-| Verify limit depletes when agent spends pathUSD | P0 | 20m | Manual test: call an MPP service from agent |
+| Verify limit depletes when agent spends USDC | P0 | 20m | Manual test: call an MPP service from agent |
 
 ### Milestone 2 -- 4hr mark: Kalshi + Claude via MPP work
 
@@ -141,7 +141,7 @@ Priority: **P0** = must ship, **P1** = should ship, **P2** = stretch
 |------|----------|--------|-------|
 | Call Allium via MPP for token prices to cross-ref Kalshi | P2 | 30m | `agents.allium.so` -- real blockchain data |
 | Call Dune via MPP for on-chain analytics | P2 | 30m | `api.dune.com` -- SQL queries, more spending limit drain |
-| Multi-market scan: agent evaluates 3+ markets | P2 | 30m | Costs more pathUSD -- shows limit drain better |
+| Multi-market scan: agent evaluates 3+ markets | P2 | 30m | Costs more USDC -- shows limit drain better |
 | Spending limit auto-refill request flow | P2 | 45m | Agent detects low budget, prompts user to top up |
 | MPP over MCP transport (native in mppx) | P2 | 1hr | Expose services as MCP tools with payments |
 
@@ -161,10 +161,10 @@ Priority: **P0** = must ship, **P1** = should ship, **P2** = stretch
 ## Demo Script (2 min)
 
 1. "Here's the UI. I'm going to give an AI agent a $10 spending limit on Tempo -- not in a smart contract, baked into the protocol itself."
-2. Click **Approve 10 pathUSD** -> MetaMask prompt -> limit appears in UI
+2. Click **Approve 10 USDC** -> MetaMask prompt -> limit appears in UI
 3. Type intent: _"Bet 5 USDC on BTC above $90k by end of March"_
 4. Click **Run Agent** -> show step log:
-   - `-> Fetching Kalshi markets... paid 1 pathUSD (limit: 9.00)`
-   - `-> Evaluating trade via Claude on MPP... paid ~0.01 pathUSD (limit: 8.99)`
+   - `-> Fetching Kalshi markets... paid 1 USDC (limit: 9.00)`
+   - `-> Evaluating trade via Claude on MPP... paid ~0.01 USDC (limit: 8.99)`
    - `-> Order placed on Kalshi sandbox`
 5. "The agent spent $3 of its $10 budget autonomously. It cannot spend more than $10 -- not because we wrote a check in the app, but because Tempo's AccountKeychain precompile enforces it at the protocol level."

@@ -18,8 +18,8 @@ export const ACCOUNT_KEYCHAIN = "0xAAAAAAAA00000000000000000000000000000000" as 
 export const TIP20_FACTORY = "0x20fc000000000000000000000000000000000000" as const;
 export const STABLECOIN_DEX = "0xdec0000000000000000000000000000000000000" as const;
 
-// pathUSD - native stablecoin, used for MPP payments
-export const PATH_USD = "0x20c0000000000000000000000000000000000000" as const;
+// USDC on Tempo mainnet
+export const USDC = "0x20c000000000000000000000b9537d11c60e8b50" as const;
 
 export const KEYCHAIN_ABI = parseAbi([
   "function getRemainingLimit(address account, address keyId, address token) view returns (uint256)",
@@ -63,6 +63,6 @@ export function buildKeyAuthorization(
     keyType: 0, // secp256k1
     keyId: agentAddress,
     expiry: expiryTimestamp,
-    limits: [{ token: PATH_USD, limit: spendingLimitUsdc }],
+    limits: [{ token: USDC, limit: spendingLimitUsdc }],
   };
 }

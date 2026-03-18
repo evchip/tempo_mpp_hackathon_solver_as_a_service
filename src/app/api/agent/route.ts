@@ -3,7 +3,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { placeOrder } from "@/lib/kalshi";
-import { getRemainingLimit, PATH_USD } from "@/lib/tempo";
+import { getRemainingLimit, USDC } from "@/lib/tempo";
 import { initMppClient } from "@/lib/mpp";
 
 export interface AgentRequest {
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   // Initialize MPP client - fetch() now auto-pays 402 challenges with pathUSD
   await initMppClient(agentKey);
 
-  const remainingBefore = await getRemainingLimit(userAddress, agentAddress, PATH_USD);
+  const remainingBefore = await getRemainingLimit(userAddress, agentAddress, USDC);
   const steps: { action: string; cost: string }[] = [];
 
   // Step 1: Fetch Kalshi markets via our MPP endpoint (1 pathUSD)
@@ -80,7 +80,7 @@ Return ONLY a JSON object with:
   });
   steps.push({ action: "Placed order on Kalshi", cost: "0 (direct API)" });
 
-  const remainingAfter = await getRemainingLimit(userAddress, agentAddress, PATH_USD);
+  const remainingAfter = await getRemainingLimit(userAddress, agentAddress, USDC);
 
   return NextResponse.json({
     recommendation,
