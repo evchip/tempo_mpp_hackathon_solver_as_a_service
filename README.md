@@ -10,13 +10,19 @@
 ```
 Browser UI (Next.js)
     ↓ user grants Access Key (pathUSD spending limit, 1hr expiry)
-/api/agent  ←  orchestrator: calls MPP services with the agent key
-    ↓ pays 1 pathUSD                   ↓ pays 2 pathUSD
-/api/kalshi-markets              /api/evaluate
-(Kalshi market search)           (Claude recommends trade)
-    ↓
-Kalshi Sandbox API  (actual order execution)
+/api/agent  ←  orchestrator with mppx: fetch() auto-pays 402 challenges
+    │
+    ├── /api/kalshi-markets          ← OUR MPP service (1 pathUSD)
+    │   (Kalshi market data)
+    │
+    ├── anthropic.mpp.tempo.xyz      ← MARKETPLACE service (pay-per-token)
+    │   (Claude evaluates trade)
+    │
+    └── Kalshi Sandbox API           ← trade execution (direct)
 ```
+
+The agent shops across the **live MPP marketplace** (50+ services) and our custom endpoint.
+No API keys needed for Claude -- it pays per call via MPP.
 
 **Tempo primitives used:**
 - **Access Keys** (AccountKeychain precompile `0xAAAAA...`) -- protocol-native spending limits per TIP-20 token
@@ -24,8 +30,15 @@ Kalshi Sandbox API  (actual order execution)
 - **Payment lanes** -- guaranteed blockspace for payment txs even under load
 
 **Payment protocol:** MPP (Machine Payments Protocol) via `mppx` SDK (by wevm)
-- Server: `mpp.charge({ amount: "1" })` on each route
-- Client: `Mppx.create()` then `fetch()` auto-pays 402 challenges
+- Server: `mpp.charge({ amount: "1" })` on our Kalshi endpoint
+- Client: `Mppx.create()` then `fetch()` auto-pays any 402 -- ours or third-party
+
+**MPP marketplace services the agent can call:**
+- `anthropic.mpp.tempo.xyz` -- Claude (used for trade evaluation)
+- `agents.allium.so` -- real-time token prices, wallet balances, PnL
+- `api.dune.com` -- SQL queries on blockchain data
+- `exa.mpp.tempo.xyz` -- AI-powered web search
+- Full directory: `tempo wallet -t services --search <query>`
 
 ---
 
@@ -46,7 +59,7 @@ bun dev
 | Tempo mainnet wallet | MetaMask + add chain 4217 | User wallet to grant Access Key |
 | Agent throwaway key | `cast wallet new` | Signs Tempo payment txs |
 | Kalshi account | kalshi.com -> Settings -> API | Sandbox trading |
-| Anthropic API key | console.anthropic.com | Evaluator service (claude-sonnet-4-6) |
+| ~~Anthropic API key~~ | ~~not needed~~ | Claude called via MPP marketplace (pay-per-call) |
 
 ### Get mainnet pathUSD
 - Bridge USDC from Base/Ethereum via Stargate or Across
@@ -98,14 +111,14 @@ Priority: **P0** = must ship, **P1** = should ship, **P2** = stretch
 | Poll `getRemainingLimit()` and show live in UI | P0 | 30m | `ACCOUNT_KEYCHAIN` precompile in `src/lib/tempo.ts` |
 | Verify limit depletes when agent spends pathUSD | P0 | 20m | Manual test: call an MPP service from agent |
 
-### Milestone 2 -- 4hr mark: Kalshi service works
+### Milestone 2 -- 4hr mark: Kalshi + Claude via MPP work
 
 | Task | Priority | Effort | Notes |
 |------|----------|--------|-------|
 | Wire up Kalshi ECDSA auth in `src/lib/kalshi.ts` | P0 | 45m | P-256 signing, see [Kalshi auth docs](https://trading-api.readme.io/reference/authentication) |
 | Test `/api/kalshi-markets` returns real data behind MPP paywall | P0 | 20m | |
-| Test `/api/evaluate` returns valid `TradeRecommendation` | P0 | 20m | |
-| Test agent calls both services, limit drops 3 pathUSD | P0 | 20m | Check on explore.tempo.xyz |
+| Test agent calls Claude via `anthropic.mpp.tempo.xyz` | P0 | 20m | No API key -- paid via Access Key |
+| Test full agent loop: Kalshi data + Claude eval, limit drains | P0 | 20m | Check on explore.tempo.xyz |
 
 ### Milestone 3 -- 5hr mark: Full end-to-end
 
@@ -126,7 +139,8 @@ Priority: **P0** = must ship, **P1** = should ship, **P2** = stretch
 
 | Task | Priority | Effort | Notes |
 |------|----------|--------|-------|
-| Add `/api/price-feed` MPP service (Redstone/Chainlink) | P2 | 1hr | Cross-ref Kalshi crypto markets vs spot price |
+| Call Allium via MPP for token prices to cross-ref Kalshi | P2 | 30m | `agents.allium.so` -- real blockchain data |
+| Call Dune via MPP for on-chain analytics | P2 | 30m | `api.dune.com` -- SQL queries, more spending limit drain |
 | Multi-market scan: agent evaluates 3+ markets | P2 | 30m | Costs more pathUSD -- shows limit drain better |
 | Spending limit auto-refill request flow | P2 | 45m | Agent detects low budget, prompts user to top up |
 | MPP over MCP transport (native in mppx) | P2 | 1hr | Expose services as MCP tools with payments |
@@ -151,6 +165,6 @@ Priority: **P0** = must ship, **P1** = should ship, **P2** = stretch
 3. Type intent: _"Bet 5 USDC on BTC above $90k by end of March"_
 4. Click **Run Agent** -> show step log:
    - `-> Fetching Kalshi markets... paid 1 pathUSD (limit: 9.00)`
-   - `-> Evaluating trade... paid 2 pathUSD (limit: 7.00)`
+   - `-> Evaluating trade via Claude on MPP... paid ~0.01 pathUSD (limit: 8.99)`
    - `-> Order placed on Kalshi sandbox`
 5. "The agent spent $3 of its $10 budget autonomously. It cannot spend more than $10 -- not because we wrote a check in the app, but because Tempo's AccountKeychain precompile enforces it at the protocol level."

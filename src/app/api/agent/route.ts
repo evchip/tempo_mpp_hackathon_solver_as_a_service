@@ -1,5 +1,5 @@
 // Orchestrator: receives user intent, drives the agent loop
-// Flow: init MPP client → fetch markets (pays pathUSD) → evaluate (pays pathUSD) → execute on Kalshi
+// Calls REAL MPP marketplace services + our Kalshi endpoint, all paid via Access Key
 
 import { NextRequest, NextResponse } from "next/server";
 import { placeOrder } from "@/lib/kalshi";
@@ -18,32 +18,57 @@ export async function POST(req: NextRequest) {
   const agentAddress = process.env.AGENT_ADDRESS as `0x${string}`;
   const serviceBase = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
 
-  // Initialize MPP client - after this, fetch() auto-pays 402 challenges with pathUSD
+  // Initialize MPP client - fetch() now auto-pays 402 challenges with pathUSD
   await initMppClient(agentKey);
 
-  // Check remaining budget before starting
   const remainingBefore = await getRemainingLimit(userAddress, agentAddress, PATH_USD);
-  if (remainingBefore < 3_000_000n) {
-    return NextResponse.json({ error: "Insufficient spending limit (need 3 pathUSD min)" }, { status: 400 });
-  }
+  const steps: { action: string; cost: string }[] = [];
 
-  // Step 1: Fetch Kalshi markets (costs 1 pathUSD via MPP - automatic)
+  // Step 1: Fetch Kalshi markets via our MPP endpoint (1 pathUSD)
   const marketsRes = await fetch(`${serviceBase}/api/kalshi-markets?q=${encodeURIComponent(intent)}`);
   if (!marketsRes.ok) return NextResponse.json({ error: "Failed to fetch markets" }, { status: 502 });
   const { markets } = await marketsRes.json();
+  steps.push({ action: "Fetched Kalshi markets", cost: "1 pathUSD" });
 
   if (!markets?.length) {
-    return NextResponse.json({ error: "No matching Kalshi markets found" }, { status: 404 });
+    return NextResponse.json({ error: "No matching Kalshi markets found", steps }, { status: 404 });
   }
 
-  // Step 2: Evaluate trade (costs 2 pathUSD via MPP - automatic)
-  const evalRes = await fetch(`${serviceBase}/api/evaluate`, {
+  // Step 2: Evaluate trade via Anthropic on MPP marketplace (pay-per-call, no API key needed)
+  const evalPrompt = `You are a prediction market trader. Given the user's intent and available Kalshi markets, recommend the best trade.
+
+User intent: "${intent}"
+
+Available markets:
+${markets.map((m: any) => `- ${m.ticker}: "${m.title}" | YES bid: ${m.yes_bid}c | YES ask: ${m.yes_ask}c | Volume: ${m.volume}`).join("\n")}
+
+Return ONLY a JSON object with:
+- ticker: the market ticker to trade
+- side: "yes" or "no"
+- contracts: number of contracts (1-10)
+- rationale: 1-2 sentence explanation
+- confidence: "high", "medium", or "low"
+- yes_price: limit price in cents to use`;
+
+  const claudeRes = await fetch("https://anthropic.mpp.tempo.xyz/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ intent, markets }),
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 512,
+      messages: [{ role: "user", content: evalPrompt }],
+    }),
   });
-  if (!evalRes.ok) return NextResponse.json({ error: "Evaluator failed" }, { status: 502 });
-  const { recommendation } = await evalRes.json();
+  if (!claudeRes.ok) return NextResponse.json({ error: "Claude evaluation failed" }, { status: 502 });
+  const claudeData = await claudeRes.json();
+  steps.push({ action: "Claude evaluated trade via MPP", cost: "~0.01 pathUSD" });
+
+  const text = claudeData.content?.[0]?.text ?? "";
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    return NextResponse.json({ error: "Failed to parse recommendation", steps }, { status: 500 });
+  }
+  const recommendation = JSON.parse(jsonMatch[0]);
 
   // Step 3: Execute trade on Kalshi sandbox
   const order = await placeOrder({
@@ -53,12 +78,14 @@ export async function POST(req: NextRequest) {
     type: "limit",
     yes_price: recommendation.yes_price,
   });
+  steps.push({ action: "Placed order on Kalshi", cost: "0 (direct API)" });
 
   const remainingAfter = await getRemainingLimit(userAddress, agentAddress, PATH_USD);
 
   return NextResponse.json({
     recommendation,
     order,
+    steps,
     spent: Number(remainingBefore - remainingAfter) / 1e6,
     remainingLimit: Number(remainingAfter) / 1e6,
   });
