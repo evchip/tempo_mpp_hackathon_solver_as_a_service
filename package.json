@@ -8,6 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@polymarket/clob-client": "^5.8.0",
     "mppx": "0.4.7",
     "next": "^15.2.0",
     "react": "^19.0.0",
