@@ -9,9 +9,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
-    "@x402/axios": "^0.3.0",
-    "@x402/next": "^0.3.0",
-    "axios": "^1.7.0",
+    "mppx": "0.4.7",
     "next": "^15.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

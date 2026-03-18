@@ -1,36 +1,34 @@
-// Orchestrator: receives user intent + Access Key, drives the agent loop
-// Flow: fetch markets (x402) → evaluate (x402) → execute on Kalshi → return result
+// Orchestrator: receives user intent, drives the agent loop
+// Flow: init MPP client → fetch markets (pays pathUSD) → evaluate (pays pathUSD) → execute on Kalshi
 
 import { NextRequest, NextResponse } from "next/server";
 import { placeOrder } from "@/lib/kalshi";
-import { getRemainingLimit, USDC_E } from "@/lib/tempo";
+import { getRemainingLimit, PATH_USD } from "@/lib/tempo";
+import { initMppClient } from "@/lib/mpp";
 
 export interface AgentRequest {
   intent: string;
   userAddress: `0x${string}`;
-  // The user has already granted the Access Key on-chain before calling this endpoint.
-  // The agent wallet (AGENT_PRIVATE_KEY) will sign Tempo txs to pay x402 services.
 }
 
 export async function POST(req: NextRequest) {
   const { intent, userAddress }: AgentRequest = await req.json();
 
+  const agentKey = process.env.AGENT_PRIVATE_KEY as `0x${string}`;
   const agentAddress = process.env.AGENT_ADDRESS as `0x${string}`;
   const serviceBase = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
 
+  // Initialize MPP client - after this, fetch() auto-pays 402 challenges with pathUSD
+  await initMppClient(agentKey);
+
   // Check remaining budget before starting
-  const remainingBefore = await getRemainingLimit(userAddress, agentAddress, USDC_E);
-  if (remainingBefore < 3_000_000n) { // need at least 3 USDC.e for both services
-    return NextResponse.json({ error: "Insufficient spending limit (need 3 USDC.e min)" }, { status: 400 });
+  const remainingBefore = await getRemainingLimit(userAddress, agentAddress, PATH_USD);
+  if (remainingBefore < 3_000_000n) {
+    return NextResponse.json({ error: "Insufficient spending limit (need 3 pathUSD min)" }, { status: 400 });
   }
 
-  // Step 1: Fetch Kalshi markets (costs 1 USDC.e via x402)
-  // TODO day-of: replace fetch with @x402/axios so payment is handled automatically
-  const marketsRes = await fetch(`${serviceBase}/api/kalshi-markets?q=${encodeURIComponent(intent)}`, {
-    headers: {
-      // TODO: add X-PAYMENT header signed by agent wallet using @x402/axios
-    },
-  });
+  // Step 1: Fetch Kalshi markets (costs 1 pathUSD via MPP - automatic)
+  const marketsRes = await fetch(`${serviceBase}/api/kalshi-markets?q=${encodeURIComponent(intent)}`);
   if (!marketsRes.ok) return NextResponse.json({ error: "Failed to fetch markets" }, { status: 502 });
   const { markets } = await marketsRes.json();
 
@@ -38,13 +36,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No matching Kalshi markets found" }, { status: 404 });
   }
 
-  // Step 2: Evaluate trade (costs 2 USDC.e via x402)
+  // Step 2: Evaluate trade (costs 2 pathUSD via MPP - automatic)
   const evalRes = await fetch(`${serviceBase}/api/evaluate`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      // TODO: add X-PAYMENT header via @x402/axios
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ intent, markets }),
   });
   if (!evalRes.ok) return NextResponse.json({ error: "Evaluator failed" }, { status: 502 });
@@ -59,8 +54,7 @@ export async function POST(req: NextRequest) {
     yes_price: recommendation.yes_price,
   });
 
-  // Final remaining limit (for UI to display)
-  const remainingAfter = await getRemainingLimit(userAddress, agentAddress, USDC_E);
+  const remainingAfter = await getRemainingLimit(userAddress, agentAddress, PATH_USD);
 
   return NextResponse.json({
     recommendation,

@@ -1,43 +1,13 @@
-// x402-gated service: LLM-powered trade evaluator
-// Cost: 2 USDC.e per call
-// Takes markets + user intent, returns structured trade recommendation
+// MPP-gated service: LLM-powered trade evaluator
+// Cost: 2 pathUSD per call
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import type { KalshiMarket } from "@/lib/kalshi";
+import { createMppServer } from "@/lib/mpp";
 
+const SERVICE_WALLET = process.env.SERVICE_WALLET_ADDRESS as `0x${string}`;
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-// TODO day-of: wire up real x402 payment verification (same as kalshi-markets/route.ts)
-async function verifyPayment(req: NextRequest): Promise<boolean> {
-  const paymentHeader = req.headers.get("X-PAYMENT");
-  if (!paymentHeader) return false;
-  return true;
-}
-
-function paymentRequired() {
-  return NextResponse.json(
-    {
-      x402Version: 1,
-      error: "Payment Required",
-      accepts: [
-        {
-          scheme: "exact",
-          network: "tempo-testnet",
-          maxAmountRequired: "2000000", // 2 USDC.e
-          resource: "/api/evaluate",
-          description: "AI trade evaluator: 2 USDC.e per call",
-          mimeType: "application/json",
-          payTo: "0x...",
-          maxTimeoutSeconds: 60,
-          asset: process.env.NEXT_PUBLIC_USDC_E_ADDRESS ?? "",
-          extra: { name: "USDC.e", version: "1" },
-        },
-      ],
-    },
-    { status: 402 }
-  );
-}
 
 export interface EvaluateRequest {
   intent: string;
@@ -54,14 +24,15 @@ export interface TradeRecommendation {
 }
 
 export async function POST(req: NextRequest) {
-  const paid = await verifyPayment(req);
-  if (!paid) return paymentRequired();
+  const mpp = await createMppServer(SERVICE_WALLET);
+  const payment = await mpp.charge({ amount: "2" })(req);
+  if (payment.status === 402) return payment.challenge;
 
   const body: EvaluateRequest = await req.json();
   const { intent, markets } = body;
 
   if (!intent || !markets?.length) {
-    return NextResponse.json({ error: "intent and markets required" }, { status: 400 });
+    return payment.withReceipt(Response.json({ error: "intent and markets required" }, { status: 400 }));
   }
 
   const prompt = `You are a prediction market trader. Given the user's intent and available Kalshi markets, recommend the best trade.
@@ -88,9 +59,9 @@ Return a JSON object with:
   const text = message.content[0].type === "text" ? message.content[0].text : "";
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
-    return NextResponse.json({ error: "Failed to parse recommendation" }, { status: 500 });
+    return payment.withReceipt(Response.json({ error: "Failed to parse recommendation" }, { status: 500 }));
   }
 
   const recommendation: TradeRecommendation = JSON.parse(jsonMatch[0]);
-  return NextResponse.json({ recommendation });
+  return payment.withReceipt(Response.json({ recommendation }));
 }
