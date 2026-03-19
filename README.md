@@ -2,6 +2,8 @@
 
 An MPP service that executes cross-chain intents with cryptographic settlement.
 
+**[Try it](https://solverasaservice-production.up.railway.app)** | **[mppscan](https://www.mppscan.com/server/dd88037a9ad0e4894716f361aba3282828a3ab7184fd8374ab254cbca92b08df)** | **Install:** `npx agentcash add https://solverasaservice-production.up.railway.app`
+
 ## The Problem
 
 Buying a prediction market position today means bridging tokens, connecting to the right chain, interacting with the protocol directly, and managing wallets across networks. That sucks.
