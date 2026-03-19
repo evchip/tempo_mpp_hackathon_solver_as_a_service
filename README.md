@@ -126,14 +126,17 @@ Pick a market from the results. You need the `yesTokenId` (or `noTokenId`).
 
 ### Step 2: Set your variables
 
+All addresses come from `.env` or `.env.local`. You supply the token, recipient, and amount.
+
 ```bash
+source .env.local
+
 TOKEN_ID="<yesTokenId from step 1>"
-ESCROW=0x7331A38bAa80aa37d88D893Ad135283c34c40370
-SOLVER=0xa0dF29753C297cf0975e55B6bE7516EbB9A94fA9
-USDC=0x20c000000000000000000000b9537d11c60e8b50
-RECIPIENT="<your Polygon address where you want the CTF tokens>"
+RECIPIENT="<your Polygon address for CTF delivery>"
 AMOUNT=1000000          # $1 in USDC (6 decimals)
 DEADLINE=$(($(date +%s) + 3600))   # 1 hour from now
+
+# Derived
 ORDER_ID=$(cast keccak "order-$(date +%s)")
 TOKEN_BYTES=$(python3 -c "print('0x' + hex(int('$TOKEN_ID'))[2:].zfill(64))")
 RECIPIENT_HASH=$(cast keccak $(cast abi-encode "f(address)" $RECIPIENT))
@@ -142,22 +145,22 @@ RECIPIENT_HASH=$(cast keccak $(cast abi-encode "f(address)" $RECIPIENT))
 ### Step 3: Approve USDC to escrow
 
 ```bash
-cast send --rpc-url https://rpc.tempo.xyz \
+cast send --rpc-url $TEMPO_RPC_URL \
   --tempo.access-key $USER_TEMPO_PRIVATE_KEY \
   --tempo.root-account 0xef0726ebc08c1f89dedf559163b7ec367c98c857 \
-  --tempo.fee-token $USDC \
-  $USDC "approve(address,uint256)" $ESCROW $AMOUNT
+  --tempo.fee-token $USDC_TEMPO \
+  $USDC_TEMPO "approve(address,uint256)" $ESCROW_ADDRESS $AMOUNT
 ```
 
 ### Step 4: Deposit into escrow
 
 ```bash
-cast send --rpc-url https://rpc.tempo.xyz \
+cast send --rpc-url $TEMPO_RPC_URL \
   --tempo.access-key $USER_TEMPO_PRIVATE_KEY \
   --tempo.root-account 0xef0726ebc08c1f89dedf559163b7ec367c98c857 \
-  --tempo.fee-token $USDC \
-  $ESCROW "deposit(bytes32,address,uint256,bytes32,bytes32,uint256)" \
-  $ORDER_ID $SOLVER $AMOUNT $TOKEN_BYTES $RECIPIENT_HASH $DEADLINE
+  --tempo.fee-token $USDC_TEMPO \
+  $ESCROW_ADDRESS "deposit(bytes32,address,uint256,bytes32,bytes32,uint256)" \
+  $ORDER_ID $SERVICE_WALLET_ADDRESS $AMOUNT $TOKEN_BYTES $RECIPIENT_HASH $DEADLINE
 ```
 
 ### Step 5: Call the solver (pays $0.50 MPP service fee)
@@ -183,10 +186,10 @@ Returns `{ batchIndex, position, proof, polygonTxHash, root }`.
 
 ```bash
 # Use values from step 6
-cast send --rpc-url https://rpc.tempo.xyz \
+cast send --rpc-url $TEMPO_RPC_URL \
   --private-key $RELAYER_PRIVATE_KEY \
-  --tempo.fee-token $USDC \
-  $ESCROW "claimWithProof(bytes32,uint256,uint256,bytes32,bytes)" \
+  --tempo.fee-token $USDC_TEMPO \
+  $ESCROW_ADDRESS "claimWithProof(bytes32,uint256,uint256,bytes32,bytes)" \
   $ORDER_ID <batchIndex> <position> <polygonTxHash> <proof>
 ```
 
