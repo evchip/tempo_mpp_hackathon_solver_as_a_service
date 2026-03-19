@@ -108,15 +108,103 @@ The `WithdrawTrieVerifier` library (59 lines, from t1) verifies inclusion agains
 ```bash
 bun install
 bun dev
-
-# Search markets
-tempo request -t -X GET "http://localhost:3000/api/polymarket?q=bitcoin"
-
-# End-to-end escrow test (deposit → buy → prove → claim)
-bun run scripts/test-escrow.ts
 ```
 
 VPN required (non-US) for CLOB order placement. Polymarket geoblocks US IPs.
+
+## Running the E2E Flow Manually
+
+Prerequisites: `tempo` CLI installed, `tempo-foundry` (cast) installed, dev server running, VPN on.
+
+### Step 1: Search for a market
+
+```bash
+tempo request -t -X GET "http://localhost:3000/api/polymarket?q=bitcoin"
+```
+
+Pick a market from the results. You need the `yesTokenId` (or `noTokenId`).
+
+### Step 2: Set your variables
+
+```bash
+TOKEN_ID="<yesTokenId from step 1>"
+ESCROW=0x7331A38bAa80aa37d88D893Ad135283c34c40370
+SOLVER=0xa0dF29753C297cf0975e55B6bE7516EbB9A94fA9
+USDC=0x20c000000000000000000000b9537d11c60e8b50
+RECIPIENT="<your Polygon address where you want the CTF tokens>"
+AMOUNT=1000000          # $1 in USDC (6 decimals)
+DEADLINE=$(($(date +%s) + 3600))   # 1 hour from now
+ORDER_ID=$(cast keccak "order-$(date +%s)")
+TOKEN_BYTES=$(python3 -c "print('0x' + hex(int('$TOKEN_ID'))[2:].zfill(64))")
+RECIPIENT_HASH=$(cast keccak $(cast abi-encode "f(address)" $RECIPIENT))
+```
+
+### Step 3: Approve USDC to escrow
+
+```bash
+cast send --rpc-url https://rpc.tempo.xyz \
+  --tempo.access-key $USER_TEMPO_PRIVATE_KEY \
+  --tempo.root-account 0xef0726ebc08c1f89dedf559163b7ec367c98c857 \
+  --tempo.fee-token $USDC \
+  $USDC "approve(address,uint256)" $ESCROW $AMOUNT
+```
+
+### Step 4: Deposit into escrow
+
+```bash
+cast send --rpc-url https://rpc.tempo.xyz \
+  --tempo.access-key $USER_TEMPO_PRIVATE_KEY \
+  --tempo.root-account 0xef0726ebc08c1f89dedf559163b7ec367c98c857 \
+  --tempo.fee-token $USDC \
+  $ESCROW "deposit(bytes32,address,uint256,bytes32,bytes32,uint256)" \
+  $ORDER_ID $SOLVER $AMOUNT $TOKEN_BYTES $RECIPIENT_HASH $DEADLINE
+```
+
+### Step 5: Call the solver (pays $0.50 MPP service fee)
+
+```bash
+tempo request -X POST --json "{
+  \"order_id\": \"$ORDER_ID\",
+  \"recipient_polygon\": \"$RECIPIENT\"
+}" http://localhost:3000/api/buy-position
+```
+
+The solver reads the escrow order, buys CTF on Polymarket, transfers to your Polygon address, verifies the transfer, builds a merkle tree, and posts the root on Tempo.
+
+### Step 6: Get the proof
+
+```bash
+curl "http://localhost:3000/api/proof?orderId=$ORDER_ID"
+```
+
+Returns `{ batchIndex, position, proof, polygonTxHash, root }`.
+
+### Step 7: Claim from escrow (solver settles)
+
+```bash
+# Use values from step 6
+cast send --rpc-url https://rpc.tempo.xyz \
+  --private-key $RELAYER_PRIVATE_KEY \
+  --tempo.fee-token $USDC \
+  $ESCROW "claimWithProof(bytes32,uint256,uint256,bytes32,bytes)" \
+  $ORDER_ID <batchIndex> <position> <polygonTxHash> <proof>
+```
+
+Escrow verifies the merkle proof on-chain and releases USDC to the solver.
+
+### Step 8: Verify
+
+- Check your Polygon address on Polygonscan: CTF tokens received
+- Check Tempo explorer: escrow order settled
+- Check solver balance: USDC received
+
+### Automated
+
+All steps above are automated in the test script:
+
+```bash
+bun run scripts/test-escrow.ts
+```
 
 ## Accounts
 
