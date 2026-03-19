@@ -229,14 +229,39 @@ export async function buildAndPostRoot(): Promise<Batch | null> {
   });
 
   console.log(`[fulfillment] Posting root: batch=${batchIndex} root=${root}`);
-  const txHash = await walletClient.writeContract({
+  const commitTxHash = await walletClient.writeContract({
     address: getEscrowAddress(),
     abi: ESCROW_ABI,
     functionName: "commitRoot",
     args: [BigInt(batchIndex), root as `0x${string}`],
     feeToken: USDC,
   } as any); // feeToken is a Tempo-specific field
-  console.log(`[fulfillment] commitRoot tx: ${txHash}`);
+  console.log(`[fulfillment] commitRoot tx: ${commitTxHash}`);
+
+  // Wait for root to be confirmed before claiming
+  await publicClient.waitForTransactionReceipt({ hash: commitTxHash });
+  console.log(`[fulfillment] commitRoot confirmed`);
+
+  // Auto-claim for each fulfillment
+  for (const f of fulfillments) {
+    const leaf = computeLeaf(f.orderId, f.polygonTxHash);
+    const idx = fulfillments.indexOf(f);
+    const proofElements = tree.getProof(leaf, idx);
+    const proofHex = ("0x" + proofElements.map((p: any) => p.data.toString("hex")).join("")) as Hex;
+
+    try {
+      const claimTxHash = await walletClient.writeContract({
+        address: getEscrowAddress(),
+        abi: ESCROW_ABI,
+        functionName: "claimWithProof",
+        args: [f.orderId as `0x${string}`, BigInt(batchIndex), BigInt(idx), f.polygonTxHash as `0x${string}`, proofHex as `0x${string}`],
+        feeToken: USDC,
+      } as any);
+      console.log(`[fulfillment] Claimed order ${f.orderId}: ${claimTxHash}`);
+    } catch (err: any) {
+      console.error(`[fulfillment] Claim failed for ${f.orderId}: ${err.message}`);
+    }
+  }
 
   const batch: Batch = { batchIndex, root, fulfillments, tree };
   batches.set(batchIndex, batch);
