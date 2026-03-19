@@ -16,6 +16,9 @@ export async function GET() {
       guidance:
         "Use POST /api/advisor to get AI-powered market recommendations with ready-to-use deposit commands. Use GET /api/polymarket to search markets by keyword. Use POST /api/buy-position to fill an escrow order. Use GET /api/proof to retrieve merkle proofs for escrow claims.",
     },
+    "x-discovery": {
+      ownershipProofs: [],
+    },
     servers: [{ url: baseUrl }],
     paths: {
       "/api/polymarket": {
