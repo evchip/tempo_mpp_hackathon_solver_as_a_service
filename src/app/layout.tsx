@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Kalshi on MPP",
-  description: "Prediction market data for AI agents. Pay per request with USDC on Tempo.",
+  title: "Solver as a Service MPP",
+  description: ".",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

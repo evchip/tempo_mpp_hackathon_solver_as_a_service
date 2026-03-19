@@ -5,18 +5,19 @@
 import { MerkleTree } from "merkletreejs";
 import {
   createPublicClient,
+  createWalletClient,
   http,
   keccak256,
   encodePacked,
+  encodeFunctionData,
   parseAbi,
   getAddress,
   decodeAbiParameters,
   type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { tempo } from "./tempo";
+import { tempo, USDC } from "./tempo";
 import { CTF_ADDRESS } from "./polymarket";
-import { execSync } from "child_process";
 
 // --- Escrow ABI (subset needed by off-chain code) ---
 
@@ -56,7 +57,7 @@ async function getMppClient() {
   const account = privateKeyToAccount(pk);
 
   _mppClient = Mppx.create({
-    methods: [tempoMethod({ account })],
+    methods: [tempoMethod({ account, maxDeposit: "1" })],
     polyfill: false,
   });
   return _mppClient;
@@ -216,13 +217,26 @@ export async function buildAndPostRoot(): Promise<Batch | null> {
   });
   const batchIndex = Number(nextIdx);
 
-  // Post root to escrow via tempo-cast (viem can't pay gas on Tempo)
+  // Post root to escrow via viem Tempo transaction (feeToken for gas)
   const pk = process.env.RELAYER_PRIVATE_KEY as Hex;
   if (!pk) throw new Error("RELAYER_PRIVATE_KEY not set");
-  const USDC_TEMPO = "0x20c000000000000000000000b9537d11c60e8b50";
-  const castBin = `${process.env.HOME}/.foundry/bin/cast`;
-  const cmd = `${castBin} send --rpc-url https://rpc.tempo.xyz --private-key ${pk} --tempo.fee-token ${USDC_TEMPO} ${getEscrowAddress()} "commitRoot(uint256,bytes32)" ${batchIndex} ${root}`;
-  execSync(cmd, { encoding: "utf-8", timeout: 30000 });
+
+  const account = privateKeyToAccount(pk);
+  const walletClient = createWalletClient({
+    account,
+    chain: tempo,
+    transport: http(),
+  });
+
+  console.log(`[fulfillment] Posting root: batch=${batchIndex} root=${root}`);
+  const txHash = await walletClient.writeContract({
+    address: getEscrowAddress(),
+    abi: ESCROW_ABI,
+    functionName: "commitRoot",
+    args: [BigInt(batchIndex), root as `0x${string}`],
+    feeToken: USDC,
+  } as any); // feeToken is a Tempo-specific field
+  console.log(`[fulfillment] commitRoot tx: ${txHash}`);
 
   const batch: Batch = { batchIndex, root, fulfillments, tree };
   batches.set(batchIndex, batch);

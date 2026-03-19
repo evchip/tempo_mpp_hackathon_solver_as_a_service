@@ -8,13 +8,32 @@
 // Response: { recommendation, markets, deposit_params }
 
 import { NextRequest } from "next/server";
-import { execSync } from "child_process";
+import { type Hex } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import { createMppServer } from "@/lib/mpp";
 import { searchMarkets, type ParsedMarket } from "@/lib/polymarket";
 
 const SERVICE_WALLET = process.env.SERVICE_WALLET_ADDRESS as `0x${string}`;
 const ANTHROPIC_MPP_URL = "https://anthropic.mpp.tempo.xyz/v1/messages";
-const TEMPO_BIN = `${process.env.HOME}/.tempo/bin`;
+
+// Lazy-init MPP client for calling Anthropic
+let _mppClient: { fetch: typeof globalThis.fetch } | null = null;
+
+async function getMppClient() {
+  if (_mppClient) return _mppClient;
+
+  const { Mppx, tempo: tempoMethod } = await import("mppx/client");
+
+  const pk = process.env.RELAYER_PRIVATE_KEY as Hex;
+  if (!pk) throw new Error("RELAYER_PRIVATE_KEY not set");
+  const account = privateKeyToAccount(pk);
+
+  _mppClient = Mppx.create({
+    methods: [tempoMethod({ account, maxDeposit: "1" })],
+    polyfill: false,
+  });
+  return _mppClient;
+}
 
 export async function POST(req: NextRequest) {
   const mpp = await createMppServer(SERVICE_WALLET);
@@ -84,18 +103,18 @@ Respond with ONLY valid JSON, no markdown:
 
   let recommendation: any;
   try {
-    const claudePayload = JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 300,
-      messages: [{ role: "user", content: prompt }],
+    const client = await getMppClient();
+    const res = await client.fetch(ANTHROPIC_MPP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 300,
+        messages: [{ role: "user", content: prompt }],
+      }),
     });
 
-    const raw = execSync(
-      `${TEMPO_BIN}/tempo request -X POST -H "Content-Type: application/json" -d '${claudePayload.replace(/'/g, "'\\''")}' ${ANTHROPIC_MPP_URL}`,
-      { encoding: "utf-8", timeout: 30000 }
-    );
-
-    const claudeResponse = JSON.parse(raw);
+    const claudeResponse = await res.json();
     const text = claudeResponse.content[0].text;
     recommendation = JSON.parse(text);
   } catch (err: any) {
