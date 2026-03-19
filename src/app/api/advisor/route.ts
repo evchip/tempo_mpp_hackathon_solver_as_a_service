@@ -126,10 +126,13 @@ Respond with ONLY valid JSON, no markdown:
     );
   }
 
-  // Step 3: Construct deposit parameters
+  // Step 3: Construct deposit parameters and next-step commands
   const tokenIdBigInt = BigInt(recommendation.token_id);
   const tokenBytes = "0x" + tokenIdBigInt.toString(16).padStart(64, "0");
   const amountRaw = Math.floor(recommendation.suggested_amount_usd * 1e6);
+  const escrow = process.env.ESCROW_ADDRESS;
+  const solver = process.env.SERVICE_WALLET_ADDRESS;
+  const usdc = process.env.USDC_TEMPO ?? "0x20c000000000000000000000b9537d11c60e8b50";
 
   return payment.withReceipt(Response.json({
     recommendation: recommendation.recommendation,
@@ -142,8 +145,23 @@ Respond with ONLY valid JSON, no markdown:
       token_bytes32: tokenBytes,
       amount_usd: recommendation.suggested_amount_usd,
       amount_raw: amountRaw,
-      escrow: process.env.ESCROW_ADDRESS,
+      escrow,
+      solver,
+      usdc,
     },
+    next_steps: [
+      `# 1. Set variables`,
+      `export ORDER_ID=$(cast keccak "order-$(date +%s)") && echo $ORDER_ID`,
+      `export RECIPIENT=<your-polygon-address>`,
+      `RECIPIENT_HASH=$(cast keccak $RECIPIENT)`,
+      `DEADLINE=$(($(date +%s) + 3600))`,
+      `# 2. Approve USDC`,
+      `cast send --rpc-url $TEMPO_RPC_URL --tempo.access-key $USER_TEMPO_PRIVATE_KEY --tempo.root-account $USER_WALLET --tempo.fee-token ${usdc} ${usdc} "approve(address,uint256)" ${escrow} ${amountRaw}`,
+      `# 3. Deposit into escrow`,
+      `cast send --rpc-url $TEMPO_RPC_URL --tempo.access-key $USER_TEMPO_PRIVATE_KEY --tempo.root-account $USER_WALLET --tempo.fee-token ${usdc} ${escrow} "deposit(bytes32,address,uint256,bytes32,bytes32,uint256)" $ORDER_ID ${solver} ${amountRaw} ${tokenBytes} $RECIPIENT_HASH $DEADLINE`,
+      `# 4. Call solver`,
+      `tempo request -X POST --json '{"order_id":"'$ORDER_ID'","recipient_polygon":"'$RECIPIENT'"}' ${req.nextUrl.origin}/api/buy-position`,
+    ],
     markets_analyzed: markets.length,
     powered_by: "Claude via Anthropic MPP ($0.02/call)",
   }));
