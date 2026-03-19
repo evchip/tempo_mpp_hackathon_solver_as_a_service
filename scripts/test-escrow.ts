@@ -37,9 +37,15 @@ const RPC = process.env.TEMPO_RPC_URL ?? "https://rpc.tempo.xyz";
 const HOME = process.env.HOME!;
 const TEMPO_BIN = `${HOME}/.tempo/bin`;
 
-// User: passkey wallet + scoped access key
-const USER_ACCESS_KEY = process.env.USER_TEMPO_PRIVATE_KEY!;
-const USER_WALLET = "0xef0726ebc08c1f89dedf559163b7ec367c98c857"; // passkey wallet
+// User: passkey wallet + scoped access key (pulled from tempo wallet CLI)
+function getTempoWallet(): { key: string; wallet: string } {
+  const raw = execSync(`${TEMPO_BIN}/tempo wallet whoami -j`, { encoding: "utf-8" });
+  const data = JSON.parse(raw);
+  return { key: data.key.key, wallet: data.wallet };
+}
+const tempoWallet = getTempoWallet();
+const USER_ACCESS_KEY = process.env.USER_TEMPO_PRIVATE_KEY ?? tempoWallet.key;
+const USER_WALLET = tempoWallet.wallet;
 const userAccount = privateKeyToAccount(USER_ACCESS_KEY as Hex);
 
 // Solver: raw EOA
@@ -54,17 +60,25 @@ const ESCROW_ABI = parseAbi([
   "function orders(bytes32) view returns (address user, address solver, uint256 amount, bytes32 tokenId, bytes32 recipientHash, uint256 deadline, bool settled)",
 ]);
 
-// Helper: run tempo-cast send with access key (for user's passkey wallet)
+function extractTxHash(castOutput: string): string | null {
+  const match = castOutput.match(/transactionHash\s+(0x[a-fA-F0-9]{64})/);
+  return match ? match[1] : null;
+}
+
 function castSendAsUser(to: string, sig: string, ...args: string[]): string {
   const cmd = `${TEMPO_BIN}/tempo-cast send --rpc-url ${RPC} --tempo.access-key ${USER_ACCESS_KEY} --tempo.root-account ${USER_WALLET} --tempo.fee-token ${USDC_TEMPO} ${to} "${sig}" ${args.join(" ")}`;
-  console.log(`    $ tempo-cast send ... "${sig}"`);
-  return execSync(cmd, { encoding: "utf-8", timeout: 30000 }).trim();
+  const output = execSync(cmd, { encoding: "utf-8", timeout: 30000 }).trim();
+  const txHash = extractTxHash(output);
+  if (txHash) console.log(`    tx: https://explore.tempo.xyz/tx/${txHash}`);
+  return output;
 }
 
 function castSendAsSolver(to: string, sig: string, ...args: string[]): string {
   const cmd = `${TEMPO_BIN}/tempo-cast send --rpc-url ${RPC} --private-key ${SOLVER_KEY} --tempo.fee-token ${USDC_TEMPO} ${to} "${sig}" ${args.join(" ")}`;
-  console.log(`    $ tempo-cast send ... "${sig}"`);
-  return execSync(cmd, { encoding: "utf-8", timeout: 30000 }).trim();
+  const output = execSync(cmd, { encoding: "utf-8", timeout: 30000 }).trim();
+  const txHash = extractTxHash(output);
+  if (txHash) console.log(`    tx: https://explore.tempo.xyz/tx/${txHash}`);
+  return output;
 }
 
 async function main() {
@@ -74,6 +88,12 @@ async function main() {
   }
 
   const publicClient = createPublicClient({ chain: tempo, transport: http() });
+  const apiUrl = process.env.API_URL ?? "http://localhost:3000";
+
+  // Warm up all API routes so Next.js dev mode compiles them before we need them
+  // (prevents in-memory state from being wiped by lazy compilation)
+  await fetch(`${apiUrl}/api/proof?orderId=0x00`).catch(() => {});
+  await fetch(`${apiUrl}/api/buy-position`, { method: "POST" }).catch(() => {});
 
   // --- Config ---
   const testAmountUsd = 1;
@@ -109,12 +129,11 @@ async function main() {
 
   // Step 2: Approve USDC to escrow (via tempo-cast with access key)
   console.log("[2] Approving USDC to escrow...");
-  const approveTx = castSendAsUser(USDC_TEMPO, "approve(address,uint256)", ESCROW, amount.toString());
-  console.log(`    result: ${approveTx.slice(0, 80)}...`);
+  castSendAsUser(USDC_TEMPO, "approve(address,uint256)", ESCROW, amount.toString());
 
   // Step 3: Deposit into escrow
   console.log("[3] Depositing into escrow...");
-  const depositTx = castSendAsUser(
+  castSendAsUser(
     ESCROW,
     "deposit(bytes32,address,uint256,bytes32,bytes32,uint256)",
     orderId,
@@ -124,7 +143,6 @@ async function main() {
     recipientHash,
     deadline.toString()
   );
-  console.log(`    result: ${depositTx.slice(0, 80)}...`);
 
   // Step 4: Verify deposit on-chain
   const order = await publicClient.readContract({
@@ -136,8 +154,7 @@ async function main() {
   console.log(`[4] Order on-chain: user=${order[0]}, amount=${order[2]}, settled=${order[6]}`);
 
   // Step 5: Call buy-position API via tempo request (MPP service fee)
-  console.log("[5] Calling buy-position via tempo request (MPP payment)...");
-  const apiUrl = process.env.API_URL ?? "http://localhost:3000";
+  console.log("[5] Calling solver (pays $0.50 service fee via MPP, solver fills on Polygon)...");
   const payload = JSON.stringify({ order_id: orderId, recipient_polygon: recipientPolygon });
   let buyData: any;
   try {
@@ -146,7 +163,9 @@ async function main() {
       { encoding: "utf-8", timeout: 60000 }
     );
     buyData = JSON.parse(raw);
-    console.log(`    response:`, JSON.stringify(buyData, null, 2));
+    console.log(`    CTF transfer: https://polygonscan.com/tx/${buyData.transfer.polygon_tx}`);
+    console.log(`    shares: ${buyData.fill.shares}`);
+    console.log(`    proof: ${buyData.proof_available}`);
   } catch (err: any) {
     console.error("Buy-position failed:", err.stderr || err.message);
     process.exit(1);
@@ -165,7 +184,7 @@ async function main() {
 
   // Step 7: Claim with proof (solver calls escrow via tempo-cast)
   console.log("[7] Claiming with proof on escrow...");
-  const claimTx = castSendAsSolver(
+  castSendAsSolver(
     ESCROW,
     "claimWithProof(bytes32,uint256,uint256,bytes32,bytes)",
     orderId,
@@ -174,7 +193,6 @@ async function main() {
     proofData.polygonTxHash,
     proofData.proof
   );
-  console.log(`    result: ${claimTx.slice(0, 80)}...`);
 
   // Step 8: Verify settlement
   const orderAfter = await publicClient.readContract({

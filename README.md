@@ -131,23 +131,32 @@ All addresses come from `.env` or `.env.local`. You supply the token, recipient,
 ```bash
 source .env.local
 
+# Pull key from logged-in tempo wallet (no hardcoded PK needed)
+USER_TEMPO_PRIVATE_KEY=$(tempo wallet whoami -j | jq -r '.key.key')
+USER_WALLET=$(tempo wallet whoami -j | jq -r '.wallet')
+
 TOKEN_ID="<yesTokenId from step 1>"
 RECIPIENT="<your Polygon address for CTF delivery>"
 AMOUNT=1000000          # $1 in USDC (6 decimals)
 DEADLINE=$(($(date +%s) + 3600))   # 1 hour from now
 
+# Generate order ID ONCE. Copy this value - you need it for all remaining steps.
+export ORDER_ID=$(cast keccak "order-$(date +%s)")
+echo $ORDER_ID
+
 # Derived
-ORDER_ID=$(cast keccak "order-$(date +%s)")
 TOKEN_BYTES=$(python3 -c "print('0x' + hex(int('$TOKEN_ID'))[2:].zfill(64))")
-RECIPIENT_HASH=$(cast keccak $(cast abi-encode "f(address)" $RECIPIENT))
+RECIPIENT_HASH=$(cast keccak $RECIPIENT)
 ```
+
+**Important:** Run all steps in the same terminal session. `$ORDER_ID` must stay the same from deposit through claim.
 
 ### Step 3: Approve USDC to escrow
 
 ```bash
 cast send --rpc-url $TEMPO_RPC_URL \
   --tempo.access-key $USER_TEMPO_PRIVATE_KEY \
-  --tempo.root-account 0xef0726ebc08c1f89dedf559163b7ec367c98c857 \
+  --tempo.root-account $USER_WALLET \
   --tempo.fee-token $USDC_TEMPO \
   $USDC_TEMPO "approve(address,uint256)" $ESCROW_ADDRESS $AMOUNT
 ```
@@ -157,7 +166,7 @@ cast send --rpc-url $TEMPO_RPC_URL \
 ```bash
 cast send --rpc-url $TEMPO_RPC_URL \
   --tempo.access-key $USER_TEMPO_PRIVATE_KEY \
-  --tempo.root-account 0xef0726ebc08c1f89dedf559163b7ec367c98c857 \
+  --tempo.root-account $USER_WALLET \
   --tempo.fee-token $USDC_TEMPO \
   $ESCROW_ADDRESS "deposit(bytes32,address,uint256,bytes32,bytes32,uint256)" \
   $ORDER_ID $SERVICE_WALLET_ADDRESS $AMOUNT $TOKEN_BYTES $RECIPIENT_HASH $DEADLINE

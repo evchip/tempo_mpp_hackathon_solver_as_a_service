@@ -144,6 +144,12 @@ export default function Home() {
         />
         <Endpoint
           method="POST"
+          path="/api/advisor"
+          cost="0.25"
+          description="LLM market advisor. Claude analyzes markets via Anthropic MPP and recommends trades with deposit params."
+        />
+        <Endpoint
+          method="POST"
           path="/api/buy-position"
           cost="0.50"
           description="Fill an escrow order. Buys CTF, transfers to user, proves delivery, posts root."
