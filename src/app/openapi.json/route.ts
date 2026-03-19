@@ -27,27 +27,28 @@ export async function GET() {
             pricingMode: "fixed",
             price: "0.100000",
             protocols: ["mpp"],
+            authMode: "payment",
           },
           parameters: [
             {
               name: "q",
               in: "query",
               required: false,
-              schema: { type: "string" },
+              schema: { type: "string", description: "Search query (e.g. 'bitcoin', 'trump', 'election')" },
               description: "Search query (e.g. 'bitcoin', 'trump', 'election')",
             },
             {
               name: "condition_id",
               in: "query",
               required: false,
-              schema: { type: "string" },
+              schema: { type: "string", description: "Specific market condition ID" },
               description: "Specific market condition ID",
             },
             {
               name: "limit",
               in: "query",
               required: false,
-              schema: { type: "integer", default: 10 },
+              schema: { type: "integer", default: 10, description: "Max results to return" },
               description: "Max results to return",
             },
           ],
@@ -87,6 +88,7 @@ export async function GET() {
             pricingMode: "fixed",
             price: "0.250000",
             protocols: ["mpp"],
+            authMode: "payment",
           },
           requestBody: {
             required: true,
@@ -144,6 +146,7 @@ export async function GET() {
             pricingMode: "fixed",
             price: "0.500000",
             protocols: ["mpp"],
+            authMode: "payment",
           },
           requestBody: {
             required: true,
@@ -202,12 +205,15 @@ export async function GET() {
           operationId: "getProof",
           summary: "Get merkle proof for escrow settlement",
           tags: ["Proof"],
+          "x-payment-info": {
+            authMode: "none",
+          },
           parameters: [
             {
               name: "orderId",
               in: "query",
               required: true,
-              schema: { type: "string" },
+              schema: { type: "string", description: "Escrow order ID (bytes32 hex)" },
               description: "Escrow order ID (bytes32 hex)",
             },
           ],
