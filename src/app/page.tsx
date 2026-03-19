@@ -3,7 +3,7 @@
 export default function Home() {
   return (
     <main style={{ maxWidth: 680, margin: "60px auto", padding: "0 24px", color: "#e0e0e0" }}>
-      <h1 style={{ fontSize: 28, marginBottom: 4, color: "#fff" }}>Act on any chain. Pay on one.</h1>
+      <h1 style={{ fontSize: 28, marginBottom: 4, color: "#fff" }}>Solver as a Service</h1>
       <p style={{ color: "#888", marginBottom: 20, fontSize: 15 }}>
         Buy prediction market positions cross-chain. Pay on Tempo, receive on Polygon.
         No bridging. No multi-chain wallet. One API call.
