@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cast send:*)"
+      "Bash(cast send:*)",
+      "Bash(tempo request:*)"
     ]
   }
 }

@@ -55,9 +55,12 @@ async function handleDirectOrder(body: BuyPositionRequest) {
     return Response.json({ error: `Order failed: ${err.message}` }, { status: 502 });
   }
 
-  await new Promise((r) => setTimeout(r, 3000));
-  const balance = await getCTFBalance(token_id);
-
+  let balance = 0n;
+  for (let i = 0; i < 5; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    balance = await getCTFBalance(token_id);
+    if (balance > 0n) break;
+  }
   if (balance === 0n) {
     return Response.json({ error: "Order matched but no shares settled yet", fill }, { status: 502 });
   }
@@ -121,8 +124,14 @@ async function handleEscrowOrder(body: BuyPositionRequest) {
     return Response.json({ error: `Order failed: ${err.message}` }, { status: 502 });
   }
 
-  await new Promise((r) => setTimeout(r, 3000));
-  const balance = await getCTFBalance(tokenIdStr);
+  // Wait for CLOB settlement with retries
+  let balance = 0n;
+  for (let i = 0; i < 5; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    balance = await getCTFBalance(tokenIdStr);
+    if (balance > 0n) break;
+    console.log(`[escrow] Settlement check ${i + 1}/5: no shares yet, waiting...`);
+  }
   if (balance === 0n) {
     return Response.json({ error: "Order matched but no shares settled yet", fill }, { status: 502 });
   }
