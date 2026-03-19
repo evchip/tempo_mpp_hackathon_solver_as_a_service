@@ -1,8 +1,22 @@
 # Solver as a Service
 
-Cross-chain actions, not cross-chain tokens. Pay on Tempo, get a Polymarket position on Polygon. No bridging, no multi-chain wallet. One API call.
+An MPP service that executes cross-chain intents with cryptographic settlement.
 
-The solver buys the position, transfers it to your Polygon address, proves delivery with a merkle proof, and claims settlement from escrow. Fully automated. Neither side trusts the other.
+## The Problem
+
+Buying a prediction market position today means bridging tokens, connecting to the right chain, interacting with the protocol directly, and managing wallets across networks. An agent can't do this. A user shouldn't have to.
+
+## The Solution
+
+Pay on Tempo. Get a Polymarket position on Polygon. One API call.
+
+A solver buys the position, transfers it to your Polygon address, proves delivery with a merkle proof verified on-chain, and claims settlement from escrow. Neither side trusts the other. Settlement is cryptographic, not optimistic.
+
+An LLM advisor (Claude via Anthropic MPP) analyzes markets and recommends trades. Three MPP services chained in a single flow.
+
+```
+ask advisor → deposit into escrow → solver fills → proof verified → escrow settled
+```
 
 **Live:** [solverasaservice-production.up.railway.app](https://solverasaservice-production.up.railway.app)
 
